@@ -10,4 +10,8 @@ const loginSchema = Joi.object({
   password: Joi.string().min(6).required(),
 });
 
-module.exports = { registrationSchema, loginSchema };
+const resendVerificationSchema = Joi.object({
+  email: Joi.string().email().required(),
+});
+
+module.exports = { registrationSchema, loginSchema, resendVerificationSchema };
