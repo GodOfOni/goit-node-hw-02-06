@@ -1,5 +1,5 @@
 const express = require("express");
-const contactSchema = require("../../models/validation");
+const contactSchema = require("../../models/contactValidation");
 const {
   listContacts,
   getContactById,
