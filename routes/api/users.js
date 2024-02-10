@@ -1,12 +1,21 @@
 const express = require("express");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
+const authenticate = require("../../middleware/authenticate");
+const gravatar = require("gravatar");
+// user
 const User = require("../../models/userSchema");
 const {
   registrationSchema,
   loginSchema,
 } = require("../../models/userValidation");
-const authenticate = require("../../middleware/authenticate");
+// user
+// multer
+const multer = require("multer");
+const jimp = require("jimp");
+const storage = multer.memoryStorage();
+const upload = multer({ storage });
+// multer
 
 const router = express.Router();
 
@@ -25,17 +34,18 @@ router.post("/signup", async (req, res, next) => {
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
-
-    const newUser = new User({
+    const avatarURL = gravatar.url(email, { s: "250", d: "retro" });
+    const newUser = User.create({
       email,
       password: hashedPassword,
+      avatarURL,
     });
-    await newUser.save();
 
     res.status(201).json({
       user: {
         email: newUser.email,
         subscription: newUser.subscription,
+        avatarURL: newUser.avatarURL,
       },
     });
   } catch (error) {
@@ -96,5 +106,29 @@ router.get("/current", authenticate, async (req, res, next) => {
     next(error);
   }
 });
+
+router.patch(
+  "/avatars",
+  authenticate,
+  upload.single("avatar"),
+  async (req, res, next) => {
+    try {
+      const image = await jimp.read(req.file.buffer);
+      await image
+        .cover(250, 250)
+        .quality(90)
+        .writeAsync(`public/avatars/${req.user._id}.jpg`);
+
+      req.user.avatarURL = `/avatars/${req.user._id}.jpg`;
+      await req.user.save();
+
+      res.status(200).json({
+        avatarURL: req.user.avatarURL,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
 
 module.exports = router;
