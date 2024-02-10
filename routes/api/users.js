@@ -3,11 +3,14 @@ const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const authenticate = require("../../middleware/authenticate");
 const gravatar = require("gravatar");
+const { nanoid } = require("nanoid");
+const transporter = require("../../models/transporter");
 // user
 const User = require("../../models/userSchema");
 const {
   registrationSchema,
   loginSchema,
+  resendVerificationSchema,
 } = require("../../models/userValidation");
 // user
 // multer
@@ -35,11 +38,22 @@ router.post("/signup", async (req, res, next) => {
 
     const hashedPassword = await bcrypt.hash(password, 10);
     const avatarURL = gravatar.url(email, { s: "250", d: "retro" });
+    const verificationToken = nanoid();
     const newUser = User.create({
       email,
       password: hashedPassword,
       avatarURL,
+      verificationToken,
     });
+
+    const mailOptions = {
+      from: "adriannastal9@gmail.com",
+      to: "adriannastal9@gmail.com",
+      subject: "Account Verification",
+      text: `Verify email with code : ${verificationToken}`,
+    };
+
+    await transporter.sendMail(mailOptions);
 
     res.status(201).json({
       user: {
@@ -66,12 +80,17 @@ router.post("/login", async (req, res, next) => {
     if (!user || !(await bcrypt.compare(password, user.password))) {
       return res.status(401).json({ message: "Email or password is wrong" });
     }
-
+    if (!user.verify) {
+      return res.status(401).json({
+        message: "Email is not verified. Please verify your email first.",
+      });
+    }
     const token = jwt.sign({ userId: user._id }, "your_secret_key", {
       expiresIn: "1h",
     });
 
     user.token = token;
+
     await user.save();
 
     res.status(200).json({
@@ -79,6 +98,7 @@ router.post("/login", async (req, res, next) => {
       user: {
         email: user.email,
         subscription: user.subscription,
+        verify: user.verify,
       },
     });
   } catch (error) {
@@ -130,5 +150,71 @@ router.patch(
     }
   }
 );
+
+router.get("/verify/:verificationToken", async (req, res, next) => {
+  try {
+    const { verificationToken } = req.params;
+    const user = await User.findOne({ verificationToken });
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    user.verify = true;
+    user.verificationToken = null;
+    await user.save();
+
+    res.status(200).json({ message: "Verification successful" });
+  } catch (error) {
+    next(error);
+  }
+});
+router.post("/verify", async (req, res, next) => {
+  try {
+    const { error, value } = resendVerificationSchema.validate(req.body);
+    if (error) {
+      return res.status(400).json({ message: error.details[0].message });
+    }
+    const { email } = value;
+    if (!email) {
+      return res.status(400).json({ message: "Missing required field email" });
+    }
+
+    const user = await User.findOne({ email });
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    if (user.verify) {
+      return res
+        .status(400)
+        .json({ message: "Verification has already been passed" });
+    }
+
+    const verificationLink = `${process.env.CLIENT_URL}/users/verify/${user.verificationToken}`;
+    const mailOptions = {
+      from: process.env.GMAIL_USER,
+      to: email,
+      subject: "Account Verification",
+      text: `Click the following link to verify your account: ${verificationLink}`,
+      html: `<p>Click the following link to verify your account: <a href="${verificationLink}">${verificationLink}</a></p>`,
+    };
+
+    transporter.sendMail(mailOptions, (error, info) => {
+      if (error) {
+        console.error(error);
+        return res
+          .status(500)
+          .json({ message: "Error re-sending verification email" });
+      }
+      console.log(`Email sent: ${info.response}`);
+    });
+
+    res.status(200).json({ message: "Verification email sent" });
+  } catch (error) {
+    next(error);
+  }
+});
 
 module.exports = router;
